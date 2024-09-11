@@ -44,7 +44,8 @@ RESOURCE_KINDS_TO_CHECK = [
 SUBSTRING = "authorizer."
 
 
-THRESHOLD_COUNT = 3
+THRESHOLD_COUNT_PERCALL = 3
+THRESHOLD_COUNT_PERRES = 8
 
 
 def _subobjects_at_path(obj, path):
@@ -86,13 +87,21 @@ def _main():
                             match_conditions = _subobjects_at_path(item, resourceKind.pathToMatchConditions)
                         except ValueError:
                             pass
+                        total_count = 0  # Initialize total count for SUBSTRING
                         for match_condition in match_conditions:
                             condition_expression: str = match_condition["expression"]
                             # Count how many times SUBSTRING appears in the expression of the match condition.
-                            if condition_expression.count(SUBSTRING) >= THRESHOLD_COUNT:
+                            count = condition_expression.count(SUBSTRING)
+                            total_count += count
+                            if count >= THRESHOLD_COUNT_PERCALL:
                                 print(f"Resource {resourceKind.kind} {name} has excessive usage of auth checks in match"
                                       f" condition: {condition_expression}",
                                       file=sys.stderr)
+
+                        if total_count >= THRESHOLD_COUNT_PERRES:
+                            print(f"Resource {resourceKind.kind} {name} has excessive total usage of auth checks in match"
+                                  f" conditions: {total_count} occurrences of '{SUBSTRING}'",
+                                  file=sys.stderr)
 
                         summary_stats[resourceKind.kind] += 1
                     except (ValueError, KeyError, IndexError) as e:
