@@ -19,6 +19,7 @@ class ResourceKindInfo(NamedTuple):
     pathToMatchConditions: List[str]
     pathToValidations: List[str]
     pathToAuditAnnotations: List[str]
+    pathToVariables: List[str]
 
 
 INDEX_WILDCARD = "*"
@@ -30,7 +31,8 @@ RESOURCE_KINDS_TO_CHECK = [
         pathToName = ["metadata", "name"],
         pathToMatchConditions = ["spec", "matchConditions", INDEX_WILDCARD],
         pathToValidations = ["spec", "validations", INDEX_WILDCARD],
-        pathToAuditAnnotations = ["spec", "auditAnnotations", INDEX_WILDCARD]
+        pathToAuditAnnotations = ["spec", "auditAnnotations", INDEX_WILDCARD],
+        pathToVariables = ["spec", "variables", INDEX_WILDCARD]
     ),
 ]
 
@@ -40,6 +42,7 @@ SUBSTRING = "authorizer."
 
 THRESHOLD_COUNT_PERCALL = 3
 THRESHOLD_COUNT_PERRES = 29
+THRESHOLD_COUNT_PERMC = 9
 
 def _subobjects_at_path(obj, path):
     if not path:
@@ -78,6 +81,7 @@ def _main():
                         match_conditions = []
                         validations = []
                         audit_annotations = []
+                        variables = []
                         try:
                             match_conditions = _subobjects_at_path(item, resourceKind.pathToMatchConditions)
                         except ValueError:
@@ -90,9 +94,18 @@ def _main():
                             audit_annotations = _subobjects_at_path(item, resourceKind.pathToAuditAnnotations)
                         except ValueError:
                             pass
+                        try:
+                            variables = _subobjects_at_path(item, resourceKind.pathToVariables)
+                        except ValueError:
+                            pass
+
+                        # Create a map from variables.name to variables.expression
+                        variables_map = {var["name"]: var["expression"] for var in variables}
+
                         total_count_mc = 0  # Initialize total count for SUBSTRING in matchConditions
                         total_count_v = 0  # Initialize total count for SUBSTRING in validations
                         total_count_aa = 0  # Initialize total count for SUBSTRING in auditAnnotation
+
                         for match_condition in match_conditions:
                             condition_expression: str = match_condition["expression"]
                             # Count how many times SUBSTRING appears in the expression of the match condition.
@@ -103,20 +116,23 @@ def _main():
                                       f" condition: {condition_expression}",
                                       file=sys.stderr)
 
-                            if total_count_mc >= THRESHOLD_COUNT_PERRES:
+                            if total_count_mc >= THRESHOLD_COUNT_PERMC:
                                 print(
                                     f"Resource {resourceKind.kind} {name} has excessive total usage of auth checks in match"
                                     f" conditions: {total_count_mc} occurrences of '{SUBSTRING}'",
                                     file=sys.stderr)
                         for validation in validations:
                             validation_expression: str = validation["expression"]
+                            # Replace variable names with their expressions
+                            for var_name, var_expression in variables_map.items():
+                                validation_expression = validation_expression.replace(var_name, var_expression)
                             # Count how many times SUBSTRING appears in the expression of the match condition.
                             count = validation_expression.count(SUBSTRING)
                             total_count_v += count
                             if count >= THRESHOLD_COUNT_PERCALL:
                                 print(
                                     f"Resource {resourceKind.kind} {name} has excessive usage of auth checks in validation"
-                                    f" expression: {validation_expression}",
+                                    f" expression: {validation["expression"]}",
                                     file=sys.stderr)
 
                             if total_count_v >= THRESHOLD_COUNT_PERRES:
@@ -127,13 +143,16 @@ def _main():
 
                         for annotation in audit_annotations:
                             annotation_expression: str = annotation["valueExpression"]
+                            # Replace variable names with their expressions
+                            for var_name, var_expression in variables_map.items():
+                                annotation_expression = annotation_expression.replace(var_name, var_expression)
                             # Count how many times SUBSTRING appears in the expression of the match condition.
                             count = annotation_expression.count(SUBSTRING)
                             total_count_aa += count
                             if count >= THRESHOLD_COUNT_PERCALL:
                                 print(
                                     f"Resource {resourceKind.kind} {name} has excessive usage of auth checks in audit annotation"
-                                    f" expression: {annotation_expression}",
+                                    f" expression: {annotation["valueExpression"]}",
                                     file=sys.stderr)
 
                             if total_count_aa >= THRESHOLD_COUNT_PERRES:
